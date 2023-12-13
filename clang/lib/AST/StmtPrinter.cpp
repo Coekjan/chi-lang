@@ -454,6 +454,11 @@ void StmtPrinter::VisitMSDependentExistsStmt(MSDependentExistsStmt *Node) {
   PrintRawCompoundStmt(Node->getSubStmt());
 }
 
+void StmtPrinter::VisitChiHookStmt(ChiHookStmt *Node) {
+  Indent() << "__chi_hook__(" << Node->getLabel() << ")";
+  PrintControlledStmt(Node->getBody());
+}
+
 void StmtPrinter::VisitGotoStmt(GotoStmt *Node) {
   Indent() << "goto " << Node->getLabel()->getName() << ";";
   if (Policy.IncludeNewlines) OS << NL;

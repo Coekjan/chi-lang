@@ -1587,6 +1587,9 @@ enum StmtCode {
   /// A ForStmt record.
   STMT_FOR,
 
+  /// A ChiHookStmt record.
+  STMT_CHI_HOOK,
+
   /// A GotoStmt record.
   STMT_GOTO,
 

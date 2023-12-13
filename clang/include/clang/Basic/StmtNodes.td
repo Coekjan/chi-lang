@@ -14,6 +14,7 @@ def SwitchStmt : StmtNode<Stmt>;
 def WhileStmt : StmtNode<Stmt>;
 def DoStmt : StmtNode<Stmt>;
 def ForStmt : StmtNode<Stmt>;
+def ChiHookStmt : StmtNode<Stmt>;
 def GotoStmt : StmtNode<Stmt>;
 def IndirectGotoStmt : StmtNode<Stmt>;
 def ContinueStmt : StmtNode<Stmt>;

@@ -1429,6 +1429,9 @@ private:
   /// LabelMap - This keeps track of the LLVM basic block for each C label.
   llvm::DenseMap<const LabelDecl*, JumpDest> LabelMap;
 
+  /// ChiHookMap - This keeps track of the chi-hook statements for each C label.
+  llvm::DenseMap<const LabelDecl*, Stmt*> ChiHookMap;
+
   // BreakContinueStack - This keeps track of where break and continue
   // statements should jump to.
   struct BreakContinue {
@@ -3251,6 +3254,7 @@ public:
 
   void EmitLabelStmt(const LabelStmt &S);
   void EmitAttributedStmt(const AttributedStmt &S);
+  void EmitChiHookStmt(const ChiHookStmt &S);
   void EmitGotoStmt(const GotoStmt &S);
   void EmitIndirectGotoStmt(const IndirectGotoStmt &S);
   void EmitIfStmt(const IfStmt &S);

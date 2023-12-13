@@ -303,6 +303,11 @@ void StmtProfiler::VisitForStmt(const ForStmt *S) {
   VisitStmt(S);
 }
 
+void StmtProfiler::VisitChiHookStmt(const ChiHookStmt *S) {
+  VisitStmt(S);
+  VisitDecl(S->getLabel());
+}
+
 void StmtProfiler::VisitGotoStmt(const GotoStmt *S) {
   VisitStmt(S);
   VisitDecl(S->getLabel());

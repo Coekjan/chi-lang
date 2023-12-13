@@ -103,6 +103,7 @@ void CodeGenFunction::EmitStmt(const Stmt *S, ArrayRef<const Attr *> Attrs) {
   case Stmt::DeclStmtClass:
   case Stmt::LabelStmtClass:
   case Stmt::AttributedStmtClass:
+  case Stmt::ChiHookStmtClass:
   case Stmt::GotoStmtClass:
   case Stmt::BreakStmtClass:
   case Stmt::ContinueStmtClass:
@@ -455,6 +456,9 @@ bool CodeGenFunction::EmitSimpleStmt(const Stmt *S,
   case Stmt::AttributedStmtClass:
     EmitAttributedStmt(cast<AttributedStmt>(*S));
     break;
+  case Stmt::ChiHookStmtClass:
+    EmitChiHookStmt(cast<ChiHookStmt>(*S));
+    break;
   case Stmt::GotoStmtClass:
     EmitGotoStmt(cast<GotoStmt>(*S));
     break;
@@ -697,6 +701,11 @@ void CodeGenFunction::EmitLabelStmt(const LabelStmt &S) {
   if (getLangOpts().EHAsynch && S.isSideEntry())
     EmitSehCppScopeBegin();
 
+  Stmt *&Hook = ChiHookMap[S.getDecl()];
+  if (Hook) {
+    EmitStmt(Hook);
+  }
+
   EmitStmt(S.getSubStmt());
 }
 
@@ -731,6 +740,17 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
   SaveAndRestore save_alwaysinline(InAlwaysInlineAttributedStmt, alwaysinline);
   SaveAndRestore save_musttail(MustTailCall, musttail);
   EmitStmt(S.getSubStmt(), S.getAttrs());
+}
+
+void CodeGenFunction::EmitChiHookStmt(const ChiHookStmt &S) {
+  Stmt *&Hook = ChiHookMap[S.getLabel()];
+  if (!Hook) {
+    Hook = S.getBody();
+  } else {
+    Hook = CompoundStmt::Create(getContext(), {Hook, S.getBody()},
+                                FPOptionsOverride(), Hook->getBeginLoc(),
+                                S.getBody()->getEndLoc());
+  }
 }
 
 void CodeGenFunction::EmitGotoStmt(const GotoStmt &S) {

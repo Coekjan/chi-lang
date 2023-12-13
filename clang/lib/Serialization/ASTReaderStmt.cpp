@@ -303,6 +303,14 @@ void ASTStmtReader::VisitForStmt(ForStmt *S) {
   S->setRParenLoc(readSourceLocation());
 }
 
+void ASTStmtReader::VisitChiHookStmt(ChiHookStmt *S) {
+  VisitStmt(S);
+  S->setLabel(readDeclAs<LabelDecl>());
+  S->setHookLoc(readSourceLocation());
+  S->setLabelLoc(readSourceLocation());
+  S->setBody(Record.readSubStmt());
+}
+
 void ASTStmtReader::VisitGotoStmt(GotoStmt *S) {
   VisitStmt(S);
   S->setLabel(readDeclAs<LabelDecl>());
@@ -2877,6 +2885,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case STMT_FOR:
       S = new (Context) ForStmt(Empty);
+      break;
+
+    case STMT_CHI_HOOK:
+      S = new (Context) ChiHookStmt(Empty);
       break;
 
     case STMT_GOTO:

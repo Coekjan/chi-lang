@@ -230,6 +230,13 @@ void ASTStmtWriter::VisitForStmt(ForStmt *S) {
   Code = serialization::STMT_FOR;
 }
 
+void ASTStmtWriter::VisitChiHookStmt(ChiHookStmt *S) {
+  VisitStmt(S);
+  Record.AddDeclRef(S->getLabel());
+  Record.AddStmt(S->getBody());
+  Code = serialization::STMT_CHI_HOOK;
+}
+
 void ASTStmtWriter::VisitGotoStmt(GotoStmt *S) {
   VisitStmt(S);
   Record.AddDeclRef(S->getLabel());

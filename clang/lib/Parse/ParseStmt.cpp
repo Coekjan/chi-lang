@@ -67,6 +67,7 @@ StmtResult Parser::ParseStatement(SourceLocation *TrailingElseLoc,
 /// [OBC]   objc-synchronized-statement
 /// [GNU]   asm-statement
 /// [OMP]   openmp-construct             [TODO]
+/// [CHI]   hook-statement
 ///
 ///       labeled-statement:
 ///         identifier ':' statement
@@ -95,6 +96,9 @@ StmtResult Parser::ParseStatement(SourceLocation *TrailingElseLoc,
 /// [OBC] objc-throw-statement:
 /// [OBC]   '@' 'throw' expression ';'
 /// [OBC]   '@' 'throw' ';'
+///
+/// [CHI] hook-statement:
+///         '__chi_hook__' '(' identifier ')' statement
 ///
 StmtResult
 Parser::ParseStatementOrDeclaration(StmtVector &Stmts,
@@ -312,6 +316,10 @@ Retry:
   case tok::kw_for:                 // C99 6.8.5.3: for-statement
     return ParseForStatement(TrailingElseLoc);
 
+  case tok::kw___chi_hook__:
+    Res = ParseChiHookStatement();
+    SemiError = "chi-hook";
+    break;
   case tok::kw_goto:                // C99 6.8.6.1: goto-statement
     Res = ParseGotoStatement();
     SemiError = "goto";
@@ -2306,6 +2314,42 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc) {
   return Actions.ActOnForStmt(ForLoc, T.getOpenLocation(), FirstPart.get(),
                               SecondPart, ThirdPart, T.getCloseLocation(),
                               Body.get());
+}
+
+StmtResult Parser::ParseChiHookStatement() {
+  assert(Tok.is(tok::kw___chi_hook__) && "Not a hook stmt!");
+  SourceLocation HookLoc = ConsumeToken();
+
+  if (Tok.isNot(tok::l_paren)) {
+    Diag(Tok, diag::err_expected_lparen_after) << "__chi_hook__";
+    SkipUntil(tok::semi);
+    return StmtError();
+  }
+  ConsumeParen();
+
+  if (Tok.isNot(tok::identifier)) {
+    Diag(Tok, diag::err_expected) << tok::identifier;
+    SkipUntil(tok::semi);
+    return StmtError();
+  }
+  LabelDecl *LD = Actions.LookupOrCreateLabel(Tok.getIdentifierInfo(),
+                                              Tok.getLocation());
+  SourceLocation LabelLoc = Tok.getLocation();
+  ConsumeToken();
+
+  if (Tok.isNot(tok::r_paren)) {
+    Diag(Tok, diag::err_expected_rparen_after) << "TODO";
+    SkipUntil(tok::semi);
+    return StmtError();
+  } 
+  ConsumeParen();
+
+  StmtResult Body(ParseStatement());
+
+  if (Body.isInvalid())
+    return StmtError();
+  
+  return Actions.ActOnChiHookStmt(HookLoc, LabelLoc, LD, Body.get());
 }
 
 /// ParseGotoStatement

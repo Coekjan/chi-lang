@@ -5198,6 +5198,10 @@ public:
                                   BuildForRangeKind Kind);
   StmtResult FinishCXXForRangeStmt(Stmt *ForRange, Stmt *Body);
 
+  StmtResult ActOnChiHookStmt(SourceLocation HookLoc,
+                              SourceLocation LabelLoc,
+                              LabelDecl *TheDecl,
+                              Stmt *Body);
   StmtResult ActOnGotoStmt(SourceLocation GotoLoc,
                            SourceLocation LabelLoc,
                            LabelDecl *TheDecl);

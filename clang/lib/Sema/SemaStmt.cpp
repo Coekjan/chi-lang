@@ -3279,6 +3279,14 @@ StmtResult Sema::FinishCXXForRangeStmt(Stmt *S, Stmt *B) {
   return S;
 }
 
+StmtResult Sema::ActOnChiHookStmt(SourceLocation HookLoc,
+                                  SourceLocation LabelLoc,
+                                  LabelDecl *TheDecl,
+                                  Stmt *Body) {
+  TheDecl->markUsed(Context);
+  return new (Context) ChiHookStmt(TheDecl, HookLoc, LabelLoc, Body);
+}
+
 StmtResult Sema::ActOnGotoStmt(SourceLocation GotoLoc,
                                SourceLocation LabelLoc,
                                LabelDecl *TheDecl) {

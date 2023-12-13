@@ -232,6 +232,15 @@ protected:
     SourceLocation ForLoc;
   };
 
+  class ChiHookStmtBitfields {
+    friend class ChiHookStmt;
+
+    unsigned : NumStmtBits;
+
+    /// The location of the "for".
+    SourceLocation HookLoc;
+  };
+
   class GotoStmtBitfields {
     friend class GotoStmt;
     friend class IndirectGotoStmt;
@@ -1030,6 +1039,7 @@ protected:
     WhileStmtBitfields WhileStmtBits;
     DoStmtBitfields DoStmtBits;
     ForStmtBitfields ForStmtBits;
+    ChiHookStmtBitfields ChiHookStmtBits;
     GotoStmtBitfields GotoStmtBits;
     ContinueStmtBitfields ContinueStmtBits;
     BreakStmtBitfields BreakStmtBits;
@@ -2676,6 +2686,50 @@ public:
 
   const_child_range children() const {
     return const_child_range(&SubExprs[0], &SubExprs[0] + END_EXPR);
+  }
+};
+
+class ChiHookStmt : public Stmt {
+  LabelDecl *Label;
+  SourceLocation LabelLoc;
+  Stmt *HookBody;
+
+public:
+  ChiHookStmt(LabelDecl *label,
+              SourceLocation HL,
+              SourceLocation LL,
+              Stmt *Body)
+    : Stmt(ChiHookStmtClass), Label(label), LabelLoc(LL) {
+    setHookLoc(HL);
+    HookBody = Body;
+  }
+
+  explicit ChiHookStmt(EmptyShell Empty) : Stmt(ChiHookStmtClass, Empty) {}
+
+  LabelDecl *getLabel() const { return Label; }
+  void setLabel(LabelDecl *D) { Label = D; }
+
+  Stmt *getBody() const { return HookBody; }
+  void setBody(Stmt *Body) { HookBody = Body; }
+
+  SourceLocation getHookLoc() const { return ChiHookStmtBits.HookLoc; }
+  void setHookLoc(SourceLocation L) { ChiHookStmtBits.HookLoc = L; }
+  SourceLocation getLabelLoc() const { return LabelLoc; }
+  void setLabelLoc(SourceLocation L) { LabelLoc = L; }
+
+  SourceLocation getBeginLoc() const { return getHookLoc(); }
+  SourceLocation getEndLoc() const { return HookBody->getEndLoc(); }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == ChiHookStmtClass;
+  }
+
+  child_range children() {
+    return child_range(&HookBody, &HookBody + 1);
+  }
+
+  const_child_range children() const {
+    return const_child_range(&HookBody, &HookBody + 1);
   }
 };
 

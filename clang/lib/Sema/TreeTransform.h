@@ -1450,6 +1450,15 @@ public:
                                   Inc, RParenLoc, Body);
   }
 
+  /// Build a new chi-hook statement.
+  
+  StmtResult RebuildChiHookStmt(SourceLocation HookLoc,
+                                SourceLocation LabelLoc,
+                                LabelDecl *TheDecl,
+                                Stmt *Body) {
+    return getSema().ActOnChiHookStmt(HookLoc, LabelLoc, TheDecl, Body);
+  }
+
   /// Build a new goto statement.
   ///
   /// By default, performs semantic analysis to build the new statement.
@@ -7842,6 +7851,24 @@ TreeTransform<Derived>::TransformForStmt(ForStmt *S) {
   return getDerived().RebuildForStmt(S->getForLoc(), S->getLParenLoc(),
                                      Init.get(), Cond, FullInc,
                                      S->getRParenLoc(), Body.get());
+}
+
+template<typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformChiHookStmt(ChiHookStmt *S) {
+  Decl *LD = getDerived().TransformDecl(S->getLabel()->getLocation(),
+                                        S->getLabel());
+  if (!LD)
+    return StmtError();
+  
+  StmtResult Body = getDerived().TransformStmt(S->getBody());
+  if (Body.isInvalid())
+    return StmtError();
+
+  return getDerived().RebuildChiHookStmt(S->getHookLoc(),
+                                         S->getLabelLoc(),
+                                         cast<LabelDecl>(LD),
+                                         Body.get());
 }
 
 template<typename Derived>
