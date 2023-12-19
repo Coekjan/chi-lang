@@ -747,7 +747,7 @@ void CodeGenFunction::EmitChiHookStmt(const ChiHookStmt &S) {
   if (!Hook) {
     Hook = S.getBody();
   } else {
-    Hook = CompoundStmt::Create(getContext(), {Hook, S.getBody()},
+    Hook = CompoundStmt::Create(getContext(), {S.getBody(), Hook},
                                 FPOptionsOverride(), Hook->getBeginLoc(),
                                 S.getBody()->getEndLoc());
   }
