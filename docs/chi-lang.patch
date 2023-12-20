@@ -1,0 +1,474 @@
+diff --git a/clang/include/clang/AST/RecursiveASTVisitor.h b/clang/include/clang/AST/RecursiveASTVisitor.h
+index 604875cd6337..e334985754ef 100644
+--- a/clang/include/clang/AST/RecursiveASTVisitor.h
++++ b/clang/include/clang/AST/RecursiveASTVisitor.h
+@@ -2389,6 +2389,7 @@ DEF_TRAVERSE_STMT(ContinueStmt, {})
+ DEF_TRAVERSE_STMT(DefaultStmt, {})
+ DEF_TRAVERSE_STMT(DoStmt, {})
+ DEF_TRAVERSE_STMT(ForStmt, {})
++DEF_TRAVERSE_STMT(ChiHookStmt, {})
+ DEF_TRAVERSE_STMT(GotoStmt, {})
+ DEF_TRAVERSE_STMT(IfStmt, {})
+ DEF_TRAVERSE_STMT(IndirectGotoStmt, {})
+diff --git a/clang/include/clang/AST/Stmt.h b/clang/include/clang/AST/Stmt.h
+index 87ffebc00d7b..9199f2e7d16e 100644
+--- a/clang/include/clang/AST/Stmt.h
++++ b/clang/include/clang/AST/Stmt.h
+@@ -232,6 +232,15 @@ protected:
+     SourceLocation ForLoc;
+   };
+ 
++  class ChiHookStmtBitfields {
++    friend class ChiHookStmt;
++
++    unsigned : NumStmtBits;
++
++    /// The location of the "for".
++    SourceLocation HookLoc;
++  };
++
+   class GotoStmtBitfields {
+     friend class GotoStmt;
+     friend class IndirectGotoStmt;
+@@ -1030,6 +1039,7 @@ protected:
+     WhileStmtBitfields WhileStmtBits;
+     DoStmtBitfields DoStmtBits;
+     ForStmtBitfields ForStmtBits;
++    ChiHookStmtBitfields ChiHookStmtBits;
+     GotoStmtBitfields GotoStmtBits;
+     ContinueStmtBitfields ContinueStmtBits;
+     BreakStmtBitfields BreakStmtBits;
+@@ -2679,6 +2689,50 @@ public:
+   }
+ };
+ 
++class ChiHookStmt : public Stmt {
++  LabelDecl *Label;
++  SourceLocation LabelLoc;
++  Stmt *HookBody;
++
++public:
++  ChiHookStmt(LabelDecl *label,
++              SourceLocation HL,
++              SourceLocation LL,
++              Stmt *Body)
++    : Stmt(ChiHookStmtClass), Label(label), LabelLoc(LL) {
++    setHookLoc(HL);
++    HookBody = Body;
++  }
++
++  explicit ChiHookStmt(EmptyShell Empty) : Stmt(ChiHookStmtClass, Empty) {}
++
++  LabelDecl *getLabel() const { return Label; }
++  void setLabel(LabelDecl *D) { Label = D; }
++
++  Stmt *getBody() const { return HookBody; }
++  void setBody(Stmt *Body) { HookBody = Body; }
++
++  SourceLocation getHookLoc() const { return ChiHookStmtBits.HookLoc; }
++  void setHookLoc(SourceLocation L) { ChiHookStmtBits.HookLoc = L; }
++  SourceLocation getLabelLoc() const { return LabelLoc; }
++  void setLabelLoc(SourceLocation L) { LabelLoc = L; }
++
++  SourceLocation getBeginLoc() const { return getHookLoc(); }
++  SourceLocation getEndLoc() const { return HookBody->getEndLoc(); }
++
++  static bool classof(const Stmt *T) {
++    return T->getStmtClass() == ChiHookStmtClass;
++  }
++
++  child_range children() {
++    return child_range(&HookBody, &HookBody + 1);
++  }
++
++  const_child_range children() const {
++    return const_child_range(&HookBody, &HookBody + 1);
++  }
++};
++
+ /// GotoStmt - This represents a direct goto.
+ class GotoStmt : public Stmt {
+   LabelDecl *Label;
+diff --git a/clang/include/clang/Basic/StmtNodes.td b/clang/include/clang/Basic/StmtNodes.td
+index 4b31e06eb2cd..260180fffe33 100644
+--- a/clang/include/clang/Basic/StmtNodes.td
++++ b/clang/include/clang/Basic/StmtNodes.td
+@@ -14,6 +14,7 @@ def SwitchStmt : StmtNode<Stmt>;
+ def WhileStmt : StmtNode<Stmt>;
+ def DoStmt : StmtNode<Stmt>;
+ def ForStmt : StmtNode<Stmt>;
++def ChiHookStmt : StmtNode<Stmt>;
+ def GotoStmt : StmtNode<Stmt>;
+ def IndirectGotoStmt : StmtNode<Stmt>;
+ def ContinueStmt : StmtNode<Stmt>;
+diff --git a/clang/include/clang/Basic/TokenKinds.def b/clang/include/clang/Basic/TokenKinds.def
+index ef0dad0f2dcd..ad236723b892 100644
+--- a/clang/include/clang/Basic/TokenKinds.def
++++ b/clang/include/clang/Basic/TokenKinds.def
+@@ -332,6 +332,7 @@ KEYWORD(_Thread_local               , KEYALL)
+ KEYWORD(__func__                    , KEYALL)
+ KEYWORD(__objc_yes                  , KEYALL)
+ KEYWORD(__objc_no                   , KEYALL)
++KEYWORD(__chi_hook__                , KEYALL)
+ 
+ 
+ // C++ 2.11p1: Keywords.
+diff --git a/clang/include/clang/Parse/Parser.h b/clang/include/clang/Parse/Parser.h
+index 475dfe845528..a9b9ca33c607 100644
+--- a/clang/include/clang/Parse/Parser.h
++++ b/clang/include/clang/Parse/Parser.h
+@@ -2121,6 +2121,7 @@ private:
+   StmtResult ParseWhileStatement(SourceLocation *TrailingElseLoc);
+   StmtResult ParseDoStatement();
+   StmtResult ParseForStatement(SourceLocation *TrailingElseLoc);
++  StmtResult ParseChiHookStatement();
+   StmtResult ParseGotoStatement();
+   StmtResult ParseContinueStatement();
+   StmtResult ParseBreakStatement();
+diff --git a/clang/include/clang/Sema/Sema.h b/clang/include/clang/Sema/Sema.h
+index 3752a23faa85..e7c87a9e5ea5 100644
+--- a/clang/include/clang/Sema/Sema.h
++++ b/clang/include/clang/Sema/Sema.h
+@@ -5198,6 +5198,10 @@ public:
+                                   BuildForRangeKind Kind);
+   StmtResult FinishCXXForRangeStmt(Stmt *ForRange, Stmt *Body);
+ 
++  StmtResult ActOnChiHookStmt(SourceLocation HookLoc,
++                              SourceLocation LabelLoc,
++                              LabelDecl *TheDecl,
++                              Stmt *Body);
+   StmtResult ActOnGotoStmt(SourceLocation GotoLoc,
+                            SourceLocation LabelLoc,
+                            LabelDecl *TheDecl);
+diff --git a/clang/include/clang/Serialization/ASTBitCodes.h b/clang/include/clang/Serialization/ASTBitCodes.h
+index 2ae9e09998c4..64dcaa369ace 100644
+--- a/clang/include/clang/Serialization/ASTBitCodes.h
++++ b/clang/include/clang/Serialization/ASTBitCodes.h
+@@ -1587,6 +1587,9 @@ enum StmtCode {
+   /// A ForStmt record.
+   STMT_FOR,
+ 
++  /// A ChiHookStmt record.
++  STMT_CHI_HOOK,
++
+   /// A GotoStmt record.
+   STMT_GOTO,
+ 
+diff --git a/clang/lib/AST/StmtPrinter.cpp b/clang/lib/AST/StmtPrinter.cpp
+index c3db500d8a8d..f933114db5fe 100644
+--- a/clang/lib/AST/StmtPrinter.cpp
++++ b/clang/lib/AST/StmtPrinter.cpp
+@@ -454,6 +454,11 @@ void StmtPrinter::VisitMSDependentExistsStmt(MSDependentExistsStmt *Node) {
+   PrintRawCompoundStmt(Node->getSubStmt());
+ }
+ 
++void StmtPrinter::VisitChiHookStmt(ChiHookStmt *Node) {
++  Indent() << "__chi_hook__(" << Node->getLabel() << ")";
++  PrintControlledStmt(Node->getBody());
++}
++
+ void StmtPrinter::VisitGotoStmt(GotoStmt *Node) {
+   Indent() << "goto " << Node->getLabel()->getName() << ";";
+   if (Policy.IncludeNewlines) OS << NL;
+diff --git a/clang/lib/AST/StmtProfile.cpp b/clang/lib/AST/StmtProfile.cpp
+index d8a667b2d0fd..8c0e96435f6f 100644
+--- a/clang/lib/AST/StmtProfile.cpp
++++ b/clang/lib/AST/StmtProfile.cpp
+@@ -303,6 +303,11 @@ void StmtProfiler::VisitForStmt(const ForStmt *S) {
+   VisitStmt(S);
+ }
+ 
++void StmtProfiler::VisitChiHookStmt(const ChiHookStmt *S) {
++  VisitStmt(S);
++  VisitDecl(S->getLabel());
++}
++
+ void StmtProfiler::VisitGotoStmt(const GotoStmt *S) {
+   VisitStmt(S);
+   VisitDecl(S->getLabel());
+diff --git a/clang/lib/CodeGen/CGStmt.cpp b/clang/lib/CodeGen/CGStmt.cpp
+index 2184b8600d76..f99136e05ae3 100644
+--- a/clang/lib/CodeGen/CGStmt.cpp
++++ b/clang/lib/CodeGen/CGStmt.cpp
+@@ -103,6 +103,7 @@ void CodeGenFunction::EmitStmt(const Stmt *S, ArrayRef<const Attr *> Attrs) {
+   case Stmt::DeclStmtClass:
+   case Stmt::LabelStmtClass:
+   case Stmt::AttributedStmtClass:
++  case Stmt::ChiHookStmtClass:
+   case Stmt::GotoStmtClass:
+   case Stmt::BreakStmtClass:
+   case Stmt::ContinueStmtClass:
+@@ -455,6 +456,9 @@ bool CodeGenFunction::EmitSimpleStmt(const Stmt *S,
+   case Stmt::AttributedStmtClass:
+     EmitAttributedStmt(cast<AttributedStmt>(*S));
+     break;
++  case Stmt::ChiHookStmtClass:
++    EmitChiHookStmt(cast<ChiHookStmt>(*S));
++    break;
+   case Stmt::GotoStmtClass:
+     EmitGotoStmt(cast<GotoStmt>(*S));
+     break;
+@@ -697,6 +701,11 @@ void CodeGenFunction::EmitLabelStmt(const LabelStmt &S) {
+   if (getLangOpts().EHAsynch && S.isSideEntry())
+     EmitSehCppScopeBegin();
+ 
++  Stmt *&Hook = ChiHookMap[S.getDecl()];
++  if (Hook) {
++    EmitStmt(Hook);
++  }
++
+   EmitStmt(S.getSubStmt());
+ }
+ 
+@@ -733,6 +742,17 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
+   EmitStmt(S.getSubStmt(), S.getAttrs());
+ }
+ 
++void CodeGenFunction::EmitChiHookStmt(const ChiHookStmt &S) {
++  Stmt *&Hook = ChiHookMap[S.getLabel()];
++  if (!Hook) {
++    Hook = S.getBody();
++  } else {
++    Hook = CompoundStmt::Create(getContext(), {S.getBody(), Hook},
++                                FPOptionsOverride(), Hook->getBeginLoc(),
++                                S.getBody()->getEndLoc());
++  }
++}
++
+ void CodeGenFunction::EmitGotoStmt(const GotoStmt &S) {
+   // If this code is reachable then emit a stop point (if generating
+   // debug info). We have to do this ourselves because we are on the
+diff --git a/clang/lib/CodeGen/CodeGenFunction.h b/clang/lib/CodeGen/CodeGenFunction.h
+index 8722fd4550e4..829ce6cd272f 100644
+--- a/clang/lib/CodeGen/CodeGenFunction.h
++++ b/clang/lib/CodeGen/CodeGenFunction.h
+@@ -1429,6 +1429,9 @@ private:
+   /// LabelMap - This keeps track of the LLVM basic block for each C label.
+   llvm::DenseMap<const LabelDecl*, JumpDest> LabelMap;
+ 
++  /// ChiHookMap - This keeps track of the chi-hook statements for each C label.
++  llvm::DenseMap<const LabelDecl*, Stmt*> ChiHookMap;
++
+   // BreakContinueStack - This keeps track of where break and continue
+   // statements should jump to.
+   struct BreakContinue {
+@@ -3251,6 +3254,7 @@ public:
+ 
+   void EmitLabelStmt(const LabelStmt &S);
+   void EmitAttributedStmt(const AttributedStmt &S);
++  void EmitChiHookStmt(const ChiHookStmt &S);
+   void EmitGotoStmt(const GotoStmt &S);
+   void EmitIndirectGotoStmt(const IndirectGotoStmt &S);
+   void EmitIfStmt(const IfStmt &S);
+diff --git a/clang/lib/Parse/ParseStmt.cpp b/clang/lib/Parse/ParseStmt.cpp
+index 2346470dbdb7..14415cf3ac8f 100644
+--- a/clang/lib/Parse/ParseStmt.cpp
++++ b/clang/lib/Parse/ParseStmt.cpp
+@@ -67,6 +67,7 @@ StmtResult Parser::ParseStatement(SourceLocation *TrailingElseLoc,
+ /// [OBC]   objc-synchronized-statement
+ /// [GNU]   asm-statement
+ /// [OMP]   openmp-construct             [TODO]
++/// [CHI]   hook-statement
+ ///
+ ///       labeled-statement:
+ ///         identifier ':' statement
+@@ -96,6 +97,9 @@ StmtResult Parser::ParseStatement(SourceLocation *TrailingElseLoc,
+ /// [OBC]   '@' 'throw' expression ';'
+ /// [OBC]   '@' 'throw' ';'
+ ///
++/// [CHI] hook-statement:
++///         '__chi_hook__' '(' identifier ')' statement
++///
+ StmtResult
+ Parser::ParseStatementOrDeclaration(StmtVector &Stmts,
+                                     ParsedStmtContext StmtCtx,
+@@ -312,6 +316,10 @@ Retry:
+   case tok::kw_for:                 // C99 6.8.5.3: for-statement
+     return ParseForStatement(TrailingElseLoc);
+ 
++  case tok::kw___chi_hook__:
++    Res = ParseChiHookStatement();
++    SemiError = "chi-hook";
++    break;
+   case tok::kw_goto:                // C99 6.8.6.1: goto-statement
+     Res = ParseGotoStatement();
+     SemiError = "goto";
+@@ -2308,6 +2316,42 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc) {
+                               Body.get());
+ }
+ 
++StmtResult Parser::ParseChiHookStatement() {
++  assert(Tok.is(tok::kw___chi_hook__) && "Not a hook stmt!");
++  SourceLocation HookLoc = ConsumeToken();
++
++  if (Tok.isNot(tok::l_paren)) {
++    Diag(Tok, diag::err_expected_lparen_after) << "__chi_hook__";
++    SkipUntil(tok::semi);
++    return StmtError();
++  }
++  ConsumeParen();
++
++  if (Tok.isNot(tok::identifier)) {
++    Diag(Tok, diag::err_expected) << tok::identifier;
++    SkipUntil(tok::semi);
++    return StmtError();
++  }
++  LabelDecl *LD = Actions.LookupOrCreateLabel(Tok.getIdentifierInfo(),
++                                              Tok.getLocation());
++  SourceLocation LabelLoc = Tok.getLocation();
++  ConsumeToken();
++
++  if (Tok.isNot(tok::r_paren)) {
++    Diag(Tok, diag::err_expected_rparen_after) << "TODO";
++    SkipUntil(tok::semi);
++    return StmtError();
++  } 
++  ConsumeParen();
++
++  StmtResult Body(ParseStatement());
++
++  if (Body.isInvalid())
++    return StmtError();
++  
++  return Actions.ActOnChiHookStmt(HookLoc, LabelLoc, LD, Body.get());
++}
++
+ /// ParseGotoStatement
+ ///       jump-statement:
+ ///         'goto' identifier ';'
+diff --git a/clang/lib/Sema/SemaExceptionSpec.cpp b/clang/lib/Sema/SemaExceptionSpec.cpp
+index 9b7ff5ff8251..d20ff5ed2271 100644
+--- a/clang/lib/Sema/SemaExceptionSpec.cpp
++++ b/clang/lib/Sema/SemaExceptionSpec.cpp
+@@ -1434,6 +1434,7 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
+   case Stmt::DoStmtClass:
+   case Stmt::ForStmtClass:
+   case Stmt::GCCAsmStmtClass:
++  case Stmt::ChiHookStmtClass:
+   case Stmt::GotoStmtClass:
+   case Stmt::IndirectGotoStmtClass:
+   case Stmt::LabelStmtClass:
+diff --git a/clang/lib/Sema/SemaStmt.cpp b/clang/lib/Sema/SemaStmt.cpp
+index 70a549938d08..0cbb307f2604 100644
+--- a/clang/lib/Sema/SemaStmt.cpp
++++ b/clang/lib/Sema/SemaStmt.cpp
+@@ -3279,6 +3279,14 @@ StmtResult Sema::FinishCXXForRangeStmt(Stmt *S, Stmt *B) {
+   return S;
+ }
+ 
++StmtResult Sema::ActOnChiHookStmt(SourceLocation HookLoc,
++                                  SourceLocation LabelLoc,
++                                  LabelDecl *TheDecl,
++                                  Stmt *Body) {
++  TheDecl->markUsed(Context);
++  return new (Context) ChiHookStmt(TheDecl, HookLoc, LabelLoc, Body);
++}
++
+ StmtResult Sema::ActOnGotoStmt(SourceLocation GotoLoc,
+                                SourceLocation LabelLoc,
+                                LabelDecl *TheDecl) {
+diff --git a/clang/lib/Sema/TreeTransform.h b/clang/lib/Sema/TreeTransform.h
+index 097e81ea7d45..8298f6df4a47 100644
+--- a/clang/lib/Sema/TreeTransform.h
++++ b/clang/lib/Sema/TreeTransform.h
+@@ -1450,6 +1450,15 @@ public:
+                                   Inc, RParenLoc, Body);
+   }
+ 
++  /// Build a new chi-hook statement.
++  
++  StmtResult RebuildChiHookStmt(SourceLocation HookLoc,
++                                SourceLocation LabelLoc,
++                                LabelDecl *TheDecl,
++                                Stmt *Body) {
++    return getSema().ActOnChiHookStmt(HookLoc, LabelLoc, TheDecl, Body);
++  }
++
+   /// Build a new goto statement.
+   ///
+   /// By default, performs semantic analysis to build the new statement.
+@@ -7844,6 +7853,24 @@ TreeTransform<Derived>::TransformForStmt(ForStmt *S) {
+                                      S->getRParenLoc(), Body.get());
+ }
+ 
++template<typename Derived>
++StmtResult
++TreeTransform<Derived>::TransformChiHookStmt(ChiHookStmt *S) {
++  Decl *LD = getDerived().TransformDecl(S->getLabel()->getLocation(),
++                                        S->getLabel());
++  if (!LD)
++    return StmtError();
++  
++  StmtResult Body = getDerived().TransformStmt(S->getBody());
++  if (Body.isInvalid())
++    return StmtError();
++
++  return getDerived().RebuildChiHookStmt(S->getHookLoc(),
++                                         S->getLabelLoc(),
++                                         cast<LabelDecl>(LD),
++                                         Body.get());
++}
++
+ template<typename Derived>
+ StmtResult
+ TreeTransform<Derived>::TransformGotoStmt(GotoStmt *S) {
+diff --git a/clang/lib/Serialization/ASTReaderStmt.cpp b/clang/lib/Serialization/ASTReaderStmt.cpp
+index 96307c35ad32..e7c9af6d4b74 100644
+--- a/clang/lib/Serialization/ASTReaderStmt.cpp
++++ b/clang/lib/Serialization/ASTReaderStmt.cpp
+@@ -303,6 +303,14 @@ void ASTStmtReader::VisitForStmt(ForStmt *S) {
+   S->setRParenLoc(readSourceLocation());
+ }
+ 
++void ASTStmtReader::VisitChiHookStmt(ChiHookStmt *S) {
++  VisitStmt(S);
++  S->setLabel(readDeclAs<LabelDecl>());
++  S->setHookLoc(readSourceLocation());
++  S->setLabelLoc(readSourceLocation());
++  S->setBody(Record.readSubStmt());
++}
++
+ void ASTStmtReader::VisitGotoStmt(GotoStmt *S) {
+   VisitStmt(S);
+   S->setLabel(readDeclAs<LabelDecl>());
+@@ -2879,6 +2887,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
+       S = new (Context) ForStmt(Empty);
+       break;
+ 
++    case STMT_CHI_HOOK:
++      S = new (Context) ChiHookStmt(Empty);
++      break;
++
+     case STMT_GOTO:
+       S = new (Context) GotoStmt(Empty);
+       break;
+diff --git a/clang/lib/Serialization/ASTWriterStmt.cpp b/clang/lib/Serialization/ASTWriterStmt.cpp
+index 896e24c8a13d..80e9e6cedead 100644
+--- a/clang/lib/Serialization/ASTWriterStmt.cpp
++++ b/clang/lib/Serialization/ASTWriterStmt.cpp
+@@ -230,6 +230,13 @@ void ASTStmtWriter::VisitForStmt(ForStmt *S) {
+   Code = serialization::STMT_FOR;
+ }
+ 
++void ASTStmtWriter::VisitChiHookStmt(ChiHookStmt *S) {
++  VisitStmt(S);
++  Record.AddDeclRef(S->getLabel());
++  Record.AddStmt(S->getBody());
++  Code = serialization::STMT_CHI_HOOK;
++}
++
+ void ASTStmtWriter::VisitGotoStmt(GotoStmt *S) {
+   VisitStmt(S);
+   Record.AddDeclRef(S->getLabel());
+diff --git a/clang/lib/StaticAnalyzer/Core/ExprEngine.cpp b/clang/lib/StaticAnalyzer/Core/ExprEngine.cpp
+index 144f034a9dfe..66c03eff989c 100644
+--- a/clang/lib/StaticAnalyzer/Core/ExprEngine.cpp
++++ b/clang/lib/StaticAnalyzer/Core/ExprEngine.cpp
+@@ -1831,6 +1831,7 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
+     case Stmt::DefaultStmtClass:
+     case Stmt::DoStmtClass:
+     case Stmt::ForStmtClass:
++    case Stmt::ChiHookStmtClass:
+     case Stmt::GotoStmtClass:
+     case Stmt::IfStmtClass:
+     case Stmt::IndirectGotoStmtClass:
